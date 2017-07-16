@@ -87,9 +87,11 @@ const DEFAULT_OPTIONS: TemplateOptions = {
 type TemplatePipe = stream.Transform;
 type LocalsTemplatePipe = (locals: any) => TemplatePipe;
 
-function htmlext(options: Partial<TemplateOptions> & { locals: any }): TemplatePipe;
-function htmlext(options?: Partial<TemplateOptions>): LocalsTemplatePipe;
-function htmlext(options?: Partial<TemplateOptions> & { locals?: any }): TemplatePipe | LocalsTemplatePipe {
+module.exports = htmlext;
+
+export default function htmlext(options: Partial<TemplateOptions> & { locals: any }): TemplatePipe;
+export default function htmlext(options?: Partial<TemplateOptions>): LocalsTemplatePipe;
+export default function htmlext(options?: Partial<TemplateOptions> & { locals?: any }): TemplatePipe | LocalsTemplatePipe {
     if (!options) options = Object.assign({}, DEFAULT_OPTIONS);
 
     if (options.delimiters) options.delimiters = Object.assign({}, DEFAULT_DELIMITERS, options.delimiters);
@@ -152,9 +154,149 @@ function htmlext(options?: Partial<TemplateOptions> & { locals?: any }): Templat
         });
     }
 }
-module.exports = htmlext;
-exports.default = htmlext;
 
+/**
+ * Parse a template and return the unwrapped output.
+ * If a cache is present, this function should only be called when a template file is updated.
+ * 
+ * @param unparsed The unparsed contents of a template file
+ * @param options The options used to handle all templates
+ */
+async function parseTemplate(unparsed: string, options: TemplateOptions): Promise<string> {
+    const OPEN      = options.delimiters.open;
+    const CLOSE     = options.delimiters.close;
+    const COMMENT   = options.delimiters.comment;
+    const ESCAPE    = options.delimiters.escape;
+    const UNESCAPE  = options.delimiters.unescape;
+    const IMPORT    = options.delimiters.import;
+
+    let parsed: string;
+    let i = 0;
+    let length = unparsed.length;
+
+    parsed = "with($locals||{}){$buffer.push(`";
+
+    for ( ; i < length; ++i) {
+        let c = unparsed[i];
+
+        if (unparsed.slice(i, i + OPEN.length) === OPEN) {
+            i += OPEN.length;
+
+            switch (unparsed[i]) {
+                case COMMENT: // Comments -- output nothing
+                    tagContents(COMMENT + CLOSE);
+                    break;
+
+                case ESCAPE: // Output escaped value
+                    ++i;
+                    parsed += "`,$xml(";
+                    parsed += tagContents();
+                    parsed += "),`";
+                    break;
+
+                case UNESCAPE: // Output unescaped value
+                    ++i;
+                    parsed += "`,(";
+                    parsed += tagContents();
+                    parsed += "),`";
+                    break;
+
+                case IMPORT: // Include another file
+                    ++i;
+                    parsed += "`,`";
+
+                    // Cache the previous values
+                    const importContents = tagContents().split("|");
+                    const templateName = importContents[0].trim();
+                    const locals = importContents[1] && importContents[1].trim() || "$locals";
+
+                    // Read the next template using the new values
+                    const unparsedImport = await getTemplate(templateName, options);
+                    parsed += "`);(function($buffer,$locals){" + unparsedImport + "})($buffer,$locals);$buffer.push(`";
+                    break;
+
+                default:
+                    parsed += "`);";
+                    parsed += tagContents();
+                    parsed += ";$buffer.push(`";
+                    break;
+            }
+        } else if (c === "\\") {
+            // Backslashes need to be escaped
+            parsed += "\\\\";
+        } else if (c === "`") {
+            // Backticks need to be escaped as that the character that we are using to surround our string literals
+            // We chose them as backtick string literals are  containing raw newline characters
+            parsed += "\\`";
+        } else if (c === "$") {
+            // Since backtick string literals in javascript support interpolation, we need to escape the dollar sign
+            parsed += "\\$";
+        } else {
+            parsed += c;
+        }
+    }
+
+    parsed += "`);}";
+    return parsed;
+
+    function tagContents(endTag = CLOSE): string {
+        let end = unparsed.indexOf(endTag, i);
+        if (end < 0) {
+            throw new Error("Could not find matching close tag '" + endTag + "'.");
+        }
+
+        let result = unparsed.substring(i, end);
+
+        // Move the cursor to the end of the tag
+        i = end + endTag.length - 1;
+
+        return result;
+    }
+}
+
+/**
+ * Gets the parsed template, either from the cache, or by loading and parsing the template from the disk.
+ * @param templateName The name of the template to load and compile
+ * @param options The options used to handle all templates
+ */
+async function getTemplate(templateName: string, options: TemplateOptions): Promise<string> {
+    if (options.cache) {
+        throw new Error("The template cache is unimplemented");
+    } else {
+        const unparsed = await options.loadFile(templateName, options);
+        const parsed = await parseTemplate(unparsed, options);
+        return parsed;
+    }
+}
+
+/**
+ * Loads a template from the disk, then compiles that template into a callable function which takes in a single parameter `locals` to use as the local variables when rendering the template.
+ * @param templateName The name of the template to compile
+ * @param options The options used to handle all templates
+ */
+export async function loadAndCompileTemplate(templateName: string, options: TemplateOptions): Promise<(locals?: any) => string> {
+    const parsed = await getTemplate(templateName, options);
+    const wrapped = "var $buffer=[];(function($buffer,$locals){" + parsed + "})($buffer,$locals);return $buffer.join(``);"
+    return new Function("$xml", "$locals", wrapped).bind(null, escape) as ($locals?: any) => string;
+}
+
+/**
+ * Compiles a template into a callable function which takes in a single parameter `locals` to use as the local variables when rendering the template.
+ * @param unparsed The unparsed contents of the template to parse
+ * @param options The options used to handle all templates
+ */
+export async function compileTemplate(unparsed: string, options: TemplateOptions): Promise<(locals?: any) => string> {
+    const parsed = parseTemplate(unparsed, options);
+    const wrapped = "var $buffer=[];(function($buffer,$locals){" + parsed + "})($buffer,$locals);return $buffer.join(``);"
+    return new Function("$xml", "$locals", wrapped).bind(null, escape) as ($locals?: any) => string;
+}
+
+/// Helper Functions
+
+/**
+ * Escapes a string for safe output in HTML.
+ * @param unsafe The value to escape
+ */
 function escape(unsafe: any): string {
     if (unsafe == null) return "";
 
@@ -170,133 +312,20 @@ function escape(unsafe: any): string {
     });
 }
 
-async function parseTemplate(template: string, options: TemplateOptions): Promise<string> {
-    const OPEN  = options.delimiters.open;
-    const CLOSE = options.delimiters.close;
-
-    let buffer: string;
-    let i = 0;
-    let length = template.length;
-
-    buffer = "var $buffer=[];with($locals||{}){$buffer.push(`";
-    await parseTemplate();
-    buffer += "`);}return $buffer.join(``);";
-
-    function tagContents(endTag = CLOSE): string {
-        let end = template.indexOf(endTag, i);
-        if (end < 0) {
-            throw new Error("Could not find matching close tag '" + endTag + "'.");
-        }
-
-        let result = template.substring(i, end);
-
-        // Move the cursor to the end of the tag
-        i = end + endTag.length - 1;
-
-        return result;
-    }
-
-    async function parseTemplate() {
-        for ( ; i < length; ++i) {
-            let tmp = template[i];
-
-            if (template.slice(i, i + OPEN.length) === OPEN) {
-                i += OPEN.length;
-
-                let prefix: string;
-                let postfix: string;
-                switch (template[i]) {
-                    case "!": // Comments -- output nothing
-                        tagContents("!" + CLOSE);
-                        break;
-
-                    case "=": // Output escaped value
-                        ++i;
-                        buffer += "`,$xml(";
-                        buffer += tagContents();
-                        buffer += "),`";
-                        break;
-
-                    case "-": // Output unescaped value
-                        ++i;
-                        buffer += "`,(";
-                        buffer += tagContents();
-                        buffer += "),`";
-                        break;
-
-                    case "+": // Include another file
-                        ++i;
-                        buffer += "`,`";
-
-                        // Cache the previous values
-                        let templateName = tagContents().trim();
-                        let prevI = i;
-                        let prevTemplate = template;
-                        let prevLength = length;
-
-                        // Read the next template using the new values
-                        i = 0;
-                        template = await options.loadFile(templateName, options);
-                        length = template.length;
-                        parseTemplate();
-
-                        // Reset the values
-                        i = prevI;
-                        template = prevTemplate;
-                        length = prevLength;
-
-                        buffer += "`,`";
-                        break;
-
-                    default:
-                        buffer += "`);";
-                        buffer += tagContents();
-                        buffer += ";$buffer.push(`";
-                        break;
-                }
-            } else if (tmp === "\\") {
-                // Backslashes need to be escaped
-                buffer += "\\\\";
-            } else if (tmp === "`") {
-                // Backticks need to be escaped as that the character that we are using to surround our string literals
-                // We chose them as backtick string literals are  containing raw newline characters
-                buffer += "\\`";
-            } else if (tmp === "$") {
-                // Since backtick string literals in javascript support interpolation, we need to escape the dollar sign
-                buffer += "\\$";
-            } else {
-                buffer += tmp;
-            }
-        }
-    }
-
-    return buffer;
-}
-
-async function compileTemplate(template: string, options: TemplateOptions): Promise<(locals?: any) => string> {
-    const fnBody = await parseTemplate(template, options);
-    return new Function("$xml", "$locals", fnBody).bind(null, escape) as ($locals?: any) => string;
-}
-
-async function loadTemplate(fileName: string, options: TemplateOptions, locals: any): Promise<(locals?: any) => string> {
-    let contents = await options.loadFile(fileName, options);
-    let fn = await compileTemplate(contents, options);
-    return fn;
-}
-
-async function loadFile(fileName: string, options: TemplateOptions): Promise<string> {
-    if (options.cache && fileName in options.cache) {
-        return options.cache[fileName];
-    }
-
+/**
+ * Loads a template file from the disk.
+ * @param templateName The name of the template to load
+ * @param options The options used to handle all templates
+ */
+async function loadFile(templateName: string, options: TemplateOptions): Promise<string> {
     return new Promise(function (resolve: (string) => void, reject: (Error) => void) {
-        let filePath = path.resolve(options.base, fileName + (options.ext ?  "." + options.ext : ""));
+        let filePath = path.resolve(options.base, templateName + (options.ext ?  "." + options.ext : ""));
         fs.readFile(filePath, "utf8", function (error: Error, fileContents: string) {
             if (error) {
                 reject(error);
             } else {
-                if (options.cache && fileName in options.cache) {
-                    options.cache[fileName] = fileContents;
+                if (options.cache && templateName in options.cache) {
+                    options.cache[templateName] = fileContents;
                 }
 
                 resolve(fileContents);
