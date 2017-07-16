@@ -16,9 +16,11 @@ The `<%= ... %>` tag supports outputting a value from javascript. The value is e
 
 The `<%- ... %>` tag supports outputting an unescaped value from javascript. Sometimes it might be easier to generate the full HTML output using javascript. This will allow you to do that, but do so carefully.
 
-#### Import `<%+ template_name %>`
+#### Import `<%+ template_name %>` or `<%+ template_name | locals_expression %>`
 
 The `<%+ template_name %>` tag allows importing another template file into this one. By default this template acts as if it were typed directly inline with the rest of the code. This means that it shares the variables and can arbitrarily manipulate them.
+
+If, instead, a locals expression is passed (separated by a pipe `|`), that object will be used to house the local variables in the imported template. This allows scoping and renaming the variables.
 
 #### Comment `<%! comment !%>`
 
