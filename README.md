@@ -31,12 +31,13 @@ The `<%! template_name !%>` tag allows adding comments to the template that will
 ## Options
 
 ### base: string
-**Optional:** defaults to `process.cwd()`.
+**Optional:** defaults to `""`.
 The base path to include templates from.
 
 ### ext: string
-**Optional:** defaults to `"html"`.
+**Optional:** defaults to `""` (no extension).
 The extension to append to the included template file names.
+This is really just a convenience feature.
 
 ### delimiters: any
 **Optional.**

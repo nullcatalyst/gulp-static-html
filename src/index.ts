@@ -5,7 +5,7 @@ import * as through from "through2";
 import * as htmlmin from "html-minifier";
 import * as gutil   from "gulp-util";
 
-interface DelimiterOptions {
+export interface DelimiterOptions {
     // The open delimiter. Defaults to "<%"
     open?: string;
 
@@ -26,7 +26,9 @@ interface DelimiterOptions {
     comment?: string;
 }
 
-interface TemplateOptions {
+export type MinifyOptions = htmlmin.Options;
+
+export interface Options {
     // The base path to include templates from
     base: string;
 
@@ -37,18 +39,18 @@ interface TemplateOptions {
     delimiters: Partial<DelimiterOptions>;
 
     // A function to use to escape the xml characters (or replace any other parts of the string)
-    escape: (any) => string;
+    escape: (value: any) => string;
 
     // A custom function to load files
     // Takes in the name (as found in the template) and the `dst` as passed in through the options
-    loadFile: (name: string, options: TemplateOptions) => Promise<string>;
+    loadFile: (name: string, options: Options) => Promise<string>;
 
     // An object to use to cache the outputs of included templates to speed up successive compilations
     cache?: any;
 
     // Denotes whether to minify the output or not
     // If an object is passed, then that object will be used as the options for the `html-minifier` library
-    minify?: boolean | htmlmin.Options;
+    minify?: boolean | MinifyOptions;
 }
 
 const PLUGIN_NAME = "gulp-static-html";
@@ -58,6 +60,7 @@ const DEFAULT_DELIMITERS: DelimiterOptions = {
     close:      "%>",
     escape:     "=",
     unescape:   "-",
+    import:     "+",
     comment:    "!",
 };
 
@@ -74,9 +77,9 @@ const DEFAULT_MINIFY: htmlmin.Options = {
     useShortDoctype:                true,
 };
 
-const DEFAULT_OPTIONS: TemplateOptions = {
-    base:       process.cwd(),
-    ext:        "html",
+const DEFAULT_OPTIONS: Options = {
+    base:       "",
+    ext:        "",
     delimiters: DEFAULT_DELIMITERS,
     escape:     escape,
     loadFile:   loadFile,
@@ -87,28 +90,29 @@ const DEFAULT_OPTIONS: TemplateOptions = {
 type TemplatePipe = stream.Transform;
 type LocalsTemplatePipe = (locals: any) => TemplatePipe;
 
-module.exports = htmlext;
 
-export default function htmlext(options: Partial<TemplateOptions> & { locals: any }): TemplatePipe;
-export default function htmlext(options?: Partial<TemplateOptions>): LocalsTemplatePipe;
-export default function htmlext(options?: Partial<TemplateOptions> & { locals?: any }): TemplatePipe | LocalsTemplatePipe {
-    if (!options) options = Object.assign({}, DEFAULT_OPTIONS);
+// Make it work on node.js
+module.exports = Template;
+module.exports.default = Template;
+module.exports.compileTemplate = compileTemplate;
+module.exports.loadAndCompileTemplate = loadAndCompileTemplate;
 
-    if (options.delimiters) options.delimiters = Object.assign({}, DEFAULT_DELIMITERS, options.delimiters);
-    let locals: any = options.locals;
-    delete options.locals;
 
-    if (options.minify && typeof options.minify !== "object") {
-        options.minify = DEFAULT_MINIFY;
+export default function Template(options: Partial<Options> & { locals: any }): TemplatePipe;
+export default function Template(options?: Partial<Options>): LocalsTemplatePipe;
+export default function Template(options?: Partial<Options> & { locals?: any }): TemplatePipe | LocalsTemplatePipe {
+    let locals: any;
+    if (options && options.locals) {
+        locals = options.locals;
+        delete options.locals;
     }
 
-    options = Object.assign({}, DEFAULT_OPTIONS, options);
-    options = Object.seal(options);
+    options = handleOptions(options);
 
     return locals ? impl(locals) : impl;
 
     function impl(locals: any) {
-        return through.obj(function (this: stream.Transform, file: any, encoding: string, callback: (error?: Error, data?: any) => void): void {
+        return through.obj(function (this: stream.Transform, file: any, encoding: string, callback: (error?: Error | null, data?: any) => void): void {
             let contents: string = "";
 
             // Empty
@@ -124,8 +128,8 @@ export default function htmlext(options?: Partial<TemplateOptions> & { locals?: 
 
             // Stream
             if (file.isStream()) {
-                file.on("readable", function (buffer) {
-                    contents += buffer.read().toString();
+                file.on("readable", function (stream: NodeJS.ReadableStream) {
+                    contents += stream.read().toString();
                 }).on("end", () => {
                     renderToBuffer();
                 });
@@ -133,12 +137,12 @@ export default function htmlext(options?: Partial<TemplateOptions> & { locals?: 
 
             function renderToBuffer(): void {
                 try {
-                    compileTemplate(contents, options as TemplateOptions)
+                    compileTemplate(contents, options as Options)
                         .then((templateFn) => {
                             let result = templateFn(locals);
 
-                            if (options.minify) {
-                                result = htmlmin.minify(result, options.minify as htmlmin.Options);
+                            if (options!.minify) {
+                                result = htmlmin.minify(result, options!.minify as htmlmin.Options);
                             }
 
                             file.contents = new Buffer(result);
@@ -155,6 +159,18 @@ export default function htmlext(options?: Partial<TemplateOptions> & { locals?: 
     }
 }
 
+function handleOptions(options?: Partial<Options>): Readonly<Options> {
+    if (!options) options = Object.assign({}, DEFAULT_OPTIONS);
+
+    if (options.delimiters) options.delimiters = Object.assign({}, DEFAULT_DELIMITERS, options.delimiters);
+
+    if (options.minify && typeof options.minify !== "object") {
+        options.minify = DEFAULT_MINIFY;
+    }
+
+    return Object.seal(Object.assign({}, DEFAULT_OPTIONS, options));
+}
+
 /**
  * Parse a template and return the unwrapped output.
  * If a cache is present, this function should only be called when a template file is updated.
@@ -162,13 +178,13 @@ export default function htmlext(options?: Partial<TemplateOptions> & { locals?: 
  * @param unparsed The unparsed contents of a template file
  * @param options The options used to handle all templates
  */
-async function parseTemplate(unparsed: string, options: TemplateOptions): Promise<string> {
-    const OPEN      = options.delimiters.open;
-    const CLOSE     = options.delimiters.close;
-    const COMMENT   = options.delimiters.comment;
-    const ESCAPE    = options.delimiters.escape;
-    const UNESCAPE  = options.delimiters.unescape;
-    const IMPORT    = options.delimiters.import;
+async function parseTemplate(unparsed: string, options: Options): Promise<string> {
+    const OPEN      = options.delimiters.open!;
+    const CLOSE     = options.delimiters.close!;
+    const COMMENT   = options.delimiters.comment!;
+    const ESCAPE    = options.delimiters.escape!;
+    const UNESCAPE  = options.delimiters.unescape!;
+    const IMPORT    = options.delimiters.import!;
 
     let parsed: string;
     let i = 0;
@@ -259,7 +275,7 @@ async function parseTemplate(unparsed: string, options: TemplateOptions): Promis
  * @param templateName The name of the template to load and compile
  * @param options The options used to handle all templates
  */
-async function getTemplate(templateName: string, options: TemplateOptions): Promise<string> {
+async function getTemplate(templateName: string, options: Options): Promise<string> {
     if (options.cache) {
         throw new Error("The template cache is unimplemented");
     } else {
@@ -270,28 +286,34 @@ async function getTemplate(templateName: string, options: TemplateOptions): Prom
 }
 
 /**
- * Loads a template from the disk, then compiles that template into a callable function which takes in a single parameter `locals` to use as the local variables when rendering the template.
- * @param templateName The name of the template to compile
- * @param options The options used to handle all templates
- */
-export async function loadAndCompileTemplate(templateName: string, options: TemplateOptions): Promise<(locals?: any) => string> {
-    const parsed = await getTemplate(templateName, options);
-    const wrapped = "var $buffer=[];(function($buffer,$locals){" + parsed + "})($buffer,$locals);return $buffer.join(``);"
-    return new Function("$xml", "$locals", wrapped).bind(null, escape) as ($locals?: any) => string;
-}
-
-/**
  * Compiles a template into a callable function which takes in a single parameter `locals` to use as the local variables when rendering the template.
  * @param unparsed The unparsed contents of the template to parse
  * @param options The options used to handle all templates
  */
-export async function compileTemplate(unparsed: string, options: TemplateOptions): Promise<(locals?: any) => string> {
-    const parsed = parseTemplate(unparsed, options);
-    const wrapped = "var $buffer=[];(function($buffer,$locals){" + parsed + "})($buffer,$locals);return $buffer.join(``);"
+export async function compileTemplate(unparsed: string, options?: Partial<Options>): Promise<(locals?: any) => string> {
+    options = handleOptions(options);
+
+    const parsed = await parseTemplate(unparsed, options as Options);
+    const wrapped = "var $buffer=[];(function($buffer,$locals){" + parsed + "})($buffer,$locals);return $buffer.join(``);";
     return new Function("$xml", "$locals", wrapped).bind(null, escape) as ($locals?: any) => string;
 }
 
-/// Helper Functions
+/**
+ * Loads a template from the disk, then compiles that template into a callable function which takes in a single parameter `locals` to use as the local variables when rendering the template.
+ * @param templateName The name of the template to compile
+ * @param options The options used to handle all templates
+ */
+export async function loadAndCompileTemplate(templateName: string, options?: Partial<Options>): Promise<(locals?: any) => string> {
+    options = handleOptions(options);
+
+    const parsed = await getTemplate(templateName, options as Options);
+    const wrapped = "var $buffer=[];(function($buffer,$locals){" + parsed + "})($buffer,$locals);return $buffer.join(``);";
+    return new Function("$xml", "$locals", wrapped).bind(null, escape) as ($locals?: any) => string;
+}
+
+////////////////////////////////
+///     Helper Functions     ///
+////////////////////////////////
 
 /**
  * Escapes a string for safe output in HTML.
@@ -317,8 +339,8 @@ function escape(unsafe: any): string {
  * @param templateName The name of the template to load
  * @param options The options used to handle all templates
  */
-async function loadFile(templateName: string, options: TemplateOptions): Promise<string> {
-    return new Promise(function (resolve: (string) => void, reject: (Error) => void) {
+async function loadFile(templateName: string, options: Options): Promise<string> {
+    return new Promise(function (resolve: (contents: string) => void, reject: (error: Error) => void) {
         let filePath = path.resolve(options.base, templateName + (options.ext ?  "." + options.ext : ""));
         fs.readFile(filePath, "utf8", function (error: Error, fileContents: string) {
             if (error) {
