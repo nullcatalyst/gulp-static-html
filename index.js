@@ -26,8 +26,7 @@ const DEFAULT_MINIFY = {
     useShortDoctype: true,
 };
 const DEFAULT_OPTIONS = {
-    src: "",
-    dst: "",
+    base: "",
     ext: "",
     delimiters: DEFAULT_DELIMITERS,
     escape: escape,
@@ -89,6 +88,7 @@ function htmlext(options) {
     }
 }
 module.exports = htmlext;
+exports.default = htmlext;
 function escape(unsafe) {
     if (unsafe == null)
         return "";
@@ -181,8 +181,8 @@ async function parseTemplate(template, options) {
                 buffer += "\\`";
             }
             else if (tmp === "$") {
-                // Since backtick string literals in javascript support interpolation
-                buffer += "\\`";
+                // Since backtick string literals in javascript support interpolation, we need to escape the dollar sign
+                buffer += "\\$";
             }
             else {
                 buffer += tmp;
@@ -205,7 +205,7 @@ async function loadFile(fileName, options) {
         return options.cache[fileName];
     }
     return new Promise(function (resolve, reject) {
-        let filePath = path.resolve(options.dst, fileName + (options.ext ? "." + options.ext : ""));
+        let filePath = path.resolve(options.base, fileName + (options.ext != null ? "." + options.ext : ""));
         fs.readFile(filePath, "utf8", function (error, fileContents) {
             if (error) {
                 reject(error);

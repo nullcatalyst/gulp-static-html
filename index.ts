@@ -28,10 +28,7 @@ interface DelimiterOptions {
 
 interface TemplateOptions {
     // The base path to include templates from
-    src: string;
-
-    // The base path to output files to
-    dst: string;
+    base: string;
 
     // The extension to append to the included template file names
     ext: string;
@@ -78,12 +75,13 @@ const DEFAULT_MINIFY: htmlmin.Options = {
 };
 
 const DEFAULT_OPTIONS: TemplateOptions = {
-    src:        "",
-    dst:        "",
-    ext:        "",
+    base:       process.cwd(),
+    ext:        "html",
     delimiters: DEFAULT_DELIMITERS,
     escape:     escape,
     loadFile:   loadFile,
+    cache:      null,
+    minify:     false,
 };
 
 type TemplatePipe = stream.Transform;
@@ -292,7 +290,7 @@ async function loadFile(fileName: string, options: TemplateOptions): Promise<str
     }
 
     return new Promise(function (resolve: (string) => void, reject: (Error) => void) {
-        let filePath = path.resolve(options.dst, fileName + (options.ext ?  "." + options.ext : ""));
+        let filePath = path.resolve(options.base, fileName + (options.ext != null ?  "." + options.ext : ""));
         fs.readFile(filePath, "utf8", function (error: Error, fileContents: string) {
             if (error) {
                 reject(error);
