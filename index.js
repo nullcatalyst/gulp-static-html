@@ -5,7 +5,7 @@ const path = require("path");
 const through = require("through2");
 const htmlmin = require("html-minifier");
 const gutil = require("gulp-util");
-const PLUGIN_NAME = "gulp-html-ext";
+const PLUGIN_NAME = "gulp-static-html";
 const DEFAULT_DELIMITERS = {
     open: "<%",
     close: "%>",
@@ -26,11 +26,13 @@ const DEFAULT_MINIFY = {
     useShortDoctype: true,
 };
 const DEFAULT_OPTIONS = {
-    base: "",
-    ext: "",
+    base: process.cwd(),
+    ext: "html",
     delimiters: DEFAULT_DELIMITERS,
     escape: escape,
     loadFile: loadFile,
+    cache: null,
+    minify: false,
 };
 function htmlext(options) {
     if (!options)
@@ -205,7 +207,7 @@ async function loadFile(fileName, options) {
         return options.cache[fileName];
     }
     return new Promise(function (resolve, reject) {
-        let filePath = path.resolve(options.base, fileName + (options.ext != null ? "." + options.ext : ""));
+        let filePath = path.resolve(options.base, fileName + (options.ext ? "." + options.ext : ""));
         fs.readFile(filePath, "utf8", function (error, fileContents) {
             if (error) {
                 reject(error);

@@ -51,7 +51,7 @@ interface TemplateOptions {
     minify?: boolean | htmlmin.Options;
 }
 
-const PLUGIN_NAME = "gulp-html-ext";
+const PLUGIN_NAME = "gulp-static-html";
 
 const DEFAULT_DELIMITERS: DelimiterOptions = {
     open:       "<%",
@@ -290,7 +290,7 @@ async function loadFile(fileName: string, options: TemplateOptions): Promise<str
     }
 
     return new Promise(function (resolve: (string) => void, reject: (Error) => void) {
-        let filePath = path.resolve(options.base, fileName + (options.ext != null ?  "." + options.ext : ""));
+        let filePath = path.resolve(options.base, fileName + (options.ext ?  "." + options.ext : ""));
         fs.readFile(filePath, "utf8", function (error: Error, fileContents: string) {
             if (error) {
                 reject(error);
