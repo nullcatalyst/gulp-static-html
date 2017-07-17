@@ -228,7 +228,7 @@ async function parseTemplate(unparsed: string, options: Options): Promise<string
 
                     // Read the next template using the new values
                     const unparsedImport = await getTemplate(templateName, options);
-                    parsed += "`);(function($buffer,$locals){" + unparsedImport + "})($buffer,$locals);$buffer.push(`";
+                    parsed += "`);(function($buffer,$locals){" + unparsedImport + "})($buffer," + locals + ");$buffer.push(`";
                     break;
 
                 default:

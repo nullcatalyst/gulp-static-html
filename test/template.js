@@ -6,6 +6,7 @@ const { compileTemplate } = require("../lib");
 async function loadFile(templateName, options) {
     const TEMPLATES = {
         "world": "World",
+        "identity": "<%= i %>",
     };
 
     return TEMPLATES[templateName];
@@ -28,5 +29,12 @@ describe("compileTemplate()", function () {
 
         let template = await compileTemplate(T1, OPTIONS);
         assert.equal(template(), "Hello World");
+    });
+
+    it("should be able to handle using a custom set of locals for imported templates", async function () {
+        const T1 = "Hello <%+ identity | { i: 1 } %>";
+
+        let template = await compileTemplate(T1, OPTIONS);
+        assert.equal(template(), "Hello 1");
     });
 });
