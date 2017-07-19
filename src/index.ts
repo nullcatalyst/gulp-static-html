@@ -66,7 +66,6 @@ const DEFAULT_DELIMITERS: DelimiterOptions = {
 
 const DEFAULT_MINIFY: htmlmin.Options = {
     collapseBooleanAttributes:      true,
-    collapseInlineTagWhitespace:    true,
     collapseWhitespace:             true,
     minifyCSS:                      true,
     minifyJS:                       true,
